@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0b1020" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Síntesis de proteínas · Gen FTL</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0;padding:0;height:100%;overflow:hidden;background:#0b1020;color:#e8eefc;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-user-select:none;user-select:none;
+  }
+  #scene{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;}
+
+  .panel{position:fixed;left:0;right:0;z-index:10;pointer-events:none;padding:8px 10px;}
+  #top{top:0;padding-top:calc(8px + env(safe-area-inset-top));}
+  #bottom{bottom:0;padding-bottom:calc(8px + env(safe-area-inset-bottom));}
+
+  .card{
+    background:rgba(13,19,38,.80);
+    border:1px solid rgba(120,160,255,.20);
+    border-radius:14px;
+    padding:8px 10px;
+    backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);
+    box-shadow:0 6px 22px rgba(0,0,0,.35);
+  }
+
+  .title{font-size:11px;letter-spacing:.5px;color:#93a9d1;text-transform:uppercase;line-height:1.25;}
+  #phaseLabel{font-size:14px;font-weight:700;margin-top:3px;color:#d3e2ff;}
+
+  .readout{display:flex;gap:6px;margin-top:7px;}
+  .cell{flex:1;min-width:0;background:rgba(255,255,255,.055);border-radius:9px;padding:5px 7px;}
+  .cell .k{display:block;font-size:9px;color:#8ba0c6;text-transform:uppercase;letter-spacing:.5px;}
+  .cell .v{
+    display:block;font-size:12.5px;font-weight:700;line-height:1.35;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    font-variant-numeric:tabular-nums;
+  }
+
+  #seqLine{
+    margin-top:7px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;
+    color:#74d69c;letter-spacing:.6px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;height:16px;line-height:16px;
+  }
+  #seqLine b{color:#f2fff7;background:rgba(46,204,113,.30);border-radius:3px;padding:0 2px;}
+
+  .controls{display:flex;align-items:center;gap:10px;pointer-events:auto;}
+  button{
+    flex:0 0 auto;
+    appearance:none;border:1px solid rgba(130,180,255,.45);
+    background:linear-gradient(180deg,#2c6bff,#1d47b8);
+    color:#fff;font-size:14px;font-weight:700;
+    padding:11px 16px;border-radius:11px;
+    letter-spacing:.3px;cursor:pointer;
+  }
+  button:active{transform:scale(.97);filter:brightness(1.1);}
+  input[type=range]{
+    flex:1 1 auto;min-width:0;height:34px;
+    -webkit-appearance:none;appearance:none;background:transparent;
+  }
+  input[type=range]::-webkit-slider-runnable-track{
+    height:6px;border-radius:3px;background:linear-gradient(90deg,#2ecc71,#4d7dff);
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:24px;height:24px;border-radius:50%;
+    background:#fff;border:3px solid #2c6bff;margin-top:-9px;
+  }
+  input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:#2ecc71;}
+  input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid #2c6bff;}
+  #speedVal{flex:0 0 auto;font-size:12px;font-weight:700;color:#b9cdf5;min-width:44px;text-align:right;
+            font-variant-numeric:tabular-nums;}
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div class="panel" id="top">
+  <div class="card">
+    <div class="title">Síntesis de proteínas · Gen FTL (ferritina, cadena ligera)</div>
+    <div id="phaseLabel">Pulsa Reproducir</div>
+    <div class="readout">
+      <div class="cell"><span class="k" id="k1">Codón</span><span class="v" id="v1">—</span></div>
+      <div class="cell"><span class="k" id="k2">Aminoácido</span><span class="v" id="v2">—</span></div>
+      <div class="cell"><span class="k" id="k3">Añadidos</span><span class="v" id="v3">0 / 175</span></div>
+    </div>
+    <div id="seqLine">—</div>
+  </div>
+</div>
+
+<div class="panel" id="bottom">
+  <div class="card controls">
+    <button id="playBtn">▶ Reproducir</button>
+    <input id="speed" type="range" min="0.25" max="8" step="0.25" value="1" />
+    <span id="speedVal">1.0x</span>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+/* =========================================================
+   1. DATOS BIOLÓGICOS REALES (gen FTL humano)
+   UniProt P02792 · NCBI NM_000146 · 528 nt
+   ========================================================= */
+const DNA_CODING =
+"ATGAGCTCCCAGATTCGTCAGAATTATTCCACCGACGTGGAGGCAGCCGTCAACAGCCTGGTCAATTTGTACCTGCAGGCCTCCTACACCTACCTCTCTCTGGGCTTCTATTTCGACCGCGATGATGTGGCTCTGGAAGGCGTGAGCCACTTCTTCCGCGAATTGGCCGAGGAGAAGCGCGAGGGCTACGAGCGTCTCCTGAAGATGCAAAACCAGCGTGGCGGCCGCGCTCTCTTCCAGGACATCAAGAAGCCAGCTGAAGATGAGTGGGGTAAAACCCCAGACGCCATGAAAGCTGCCATGGCCCTGGAGAAAAAGCTGAACCAGGCCCTTTTGGATCTTCATGCCCTGGGTTCTGCCCGCACGGACCCCCATCTCTGTGACTTCCTGGAGACTCACTTCCTAGATGAGGAAGTGAAGCTTATCAAGAAGATGGGTGACCACCTGACCAACCTCCACAGGCTGGGTGGCCCGGAGGCTGGGCTGGGCGAGTATCTCTTCGAAAGGCTCACTCTCAAGCACGACTAA";
+
+const AA_EXPECTED =
+"MSSQIRQNYSTDVEAAVNSLVNLYLQASYTYLSLGFYFDRDDVALEGVSHFFRELAEEKREGYERLLKMQNQRGGRALFQDIKKPAEDEWGKTPDAMKAAMALEKKLNQALLDLHALGSARTDPHLCDFLETHFLDEEVKLIKKMGDHLTNLHRLGGPEAGLGEYLFERLTLKHD";
+
+/* ---- Transcripción: cadena molde = complemento inverso ---- */
+const COMP = { A:'T', T:'A', G:'C', C:'G' };
+const DNA_TEMPLATE = DNA_CODING.split('').reverse().map(c => COMP[c]).join('');
+/* ---- ARNm = cadena sentido con T -> U ---- */
+const MRNA = DNA_CODING.replace(/T/g, 'U');
+const CODONS = MRNA.match(/.{3}/g);
+const N_NT = DNA_CODING.length;          // 528
+const N_CODONS = CODONS.length;          // 176 (incluye el codón de paro)
+
+/* ---- Código genético estándar universal ---- */
+const CODON_TABLE = {
+  UUU:'F',UUC:'F',UUA:'L',UUG:'L', CUU:'L',CUC:'L',CUA:'L',CUG:'L',
+  AUU:'I',AUC:'I',AUA:'I',AUG:'M', GUU:'V',GUC:'V',GUA:'V',GUG:'V',
+  UCU:'S',UCC:'S',UCA:'S',UCG:'S', CCU:'P',CCC:'P',CCA:'P',CCG:'P',
+  ACU:'T',ACC:'T',ACA:'T',ACG:'T', GCU:'A',GCC:'A',GCA:'A',GCG:'A',
+  UAU:'Y',UAC:'Y',UAA:'*',UAG:'*', CAU:'H',CAC:'H',CAA:'Q',CAG:'Q',
+  AAU:'N',AAC:'N',AAA:'K',AAG:'K', GAU:'D',GAC:'D',GAA:'E',GAG:'E',
+  UGU:'C',UGC:'C',UGA:'*',UGG:'W', CGU:'R',CGC:'R',CGA:'R',CGG:'R',
+  AGU:'S',AGC:'S',AGA:'R',AGG:'R', GGU:'G',GGC:'G',GGA:'G',GGG:'G'
+};
+
+/* ---- Traducción de la secuencia real ---- */
+const AA_SEQ = (() => {
+  const out = [];
+  for (const c of CODONS) {
+    const aa = CODON_TABLE[c];
+    if (aa === '*') break;      // codón de paro
+    out.push(aa);
+  }
+  return out;
+})();
+
+/* ---- Grupos químicos y colores ---- */
+const AA_GROUP = {
+  A:'apolar', V:'apolar', L:'apolar', I:'apolar', P:'apolar',
+  F:'apolar', M:'apolar', W:'apolar', G:'apolar',
+  S:'polar',  T:'polar',  C:'polar',  Y:'polar',  N:'polar', Q:'polar',
+  D:'acido',  E:'acido',
+  K:'basico', R:'basico', H:'basico'
+};
+const GROUP_COLORS = {
+  apolar: 0xe67e22,   // naranja
+  polar : 0x9b7dff,   // violeta
+  acido : 0xff5c5c,   // rojo
+  basico: 0x2ec4b6    // turquesa
+};
+const GROUP_NAMES = { apolar:'apolar', polar:'polar', acido:'ácido', basico:'básico' };
+const AA_NAMES = {
+  A:'Alanina', R:'Arginina', N:'Asparagina', D:'Ácido aspártico', C:'Cisteína',
+  Q:'Glutamina', E:'Ácido glutámico', G:'Glicina', H:'Histidina', I:'Isoleucina',
+  L:'Leucina', K:'Lisina', M:'Metionina', F:'Fenilalanina', P:'Prolina',
+  S:'Serina', T:'Treonina', W:'Triptófano', Y:'Tirosina', V:'Valina'
+};
+
+/* Validación silenciosa contra la secuencia esperada */
+(function validate(){
+  const ok = AA_SEQ.length === 175 && AA_SEQ.join('') === AA_EXPECTED;
+  console.log('[FTL] aminoácidos:', AA_SEQ.length, '| coincidencia:', ok);
+})();
+
+/* =========================================================
+   2. ESCENA THREE.js
+   ========================================================= */
+const canvas   = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:false, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight, false);
+
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1020);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 4000);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.80));
+const dLight = new THREE.DirectionalLight(0xffffff, 1.05); dLight.position.set(4, 8, 10); scene.add(dLight);
+const dLight2 = new THREE.DirectionalLight(0x88aaff, 0.45); dLight2.position.set(-6, -5, -8); scene.add(dLight2);
+
+/* ---- Geometrías y materiales compartidos ---- */
+const GEO_SPHERE = new THREE.SphereGeometry(1, 12, 8);
+
+const MAT = {
+  dnaCoding  : new THREE.MeshLambertMaterial({ color:0x4d7dff, emissive:0x0d1f52 }),
+  dnaTemplate: new THREE.MeshLambertMaterial({ color:0x1e3f9e, emissive:0x081130 }),
+  mrna       : new THREE.MeshLambertMaterial({ color:0x2ecc71, emissive:0x0a2b18 }),
+  mrnaActive : new THREE.MeshLambertMaterial({ color:0x8dffbc, emissive:0x2f7a4a }),
+  ribosome   : new THREE.MeshLambertMaterial({ color:0x9aa0a6, emissive:0x22262a }),
+  ribosomeLt : new THREE.MeshLambertMaterial({ color:0xb9c0c6, emissive:0x2a2f34 }),
+  trna       : new THREE.MeshLambertMaterial({ color:0xf5d020, emissive:0x3a3000 }),
+  pol        : new THREE.MeshLambertMaterial({ color:0xb06bd8, emissive:0x2a1038, transparent:true, opacity:0.42 }),
+  polRing    : new THREE.MeshLambertMaterial({ color:0xd39bff, emissive:0x35184a })
+};
+const MAT_AA = {
+  apolar: new THREE.MeshLambertMaterial({ color: GROUP_COLORS.apolar, emissive:0x2a1400 }),
+  polar : new THREE.MeshLambertMaterial({ color: GROUP_COLORS.polar,  emissive:0x1a1233 }),
+  acido : new THREE.MeshLambertMaterial({ color: GROUP_COLORS.acido,  emissive:0x2a0d0d }),
+  basico: new THREE.MeshLambertMaterial({ color: GROUP_COLORS.basico, emissive:0x0a2825 })
+};
+
+const world = new THREE.Group();
+scene.add(world);
+
+/* =========================================================
+   3. CÁMARA ORBITAL (táctil: 1 dedo rota, 2 dedos zoom)
+   ========================================================= */
+let camTheta  = 0;
+let camPhi    = Math.PI/2 - 0.14;
+let zoom      = 1;
+let baseDist  = 20;
+const camTarget = new THREE.Vector3(0, 0.4, 0);
+
+function computeBaseDist(){
+  const aspect = window.innerWidth / window.innerHeight;
+  const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2;
+  const needW = 9.5, needH = 7.0;
+  const dW = (needW/2) / (Math.tan(halfFov) * aspect);
+  const dH = (needH/2) / Math.tan(halfFov);
+  baseDist = Math.max(dW, dH);
+}
+
+function updateCamera(){
+  const r = baseDist * zoom;
+  const sp = new THREE.Spherical(r, camPhi, camTheta);
+  camera.position.setFromSpherical(sp).add(camTarget);
+  camera.lookAt(camTarget);
+}
+
+const pointers = new Map();
+function pinchDist(){
+  const p = [...pointers.values()];
+  if (p.length < 2) return 0;
+  return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+
+  if (pointers.size >= 2){
+    const before = pinchDist();
+    p.x = e.clientX; p.y = e.clientY;
+    const after = pinchDist();
+    if (before > 1 && after > 1){
+      zoom = THREE.MathUtils.clamp(zoom * (before / after), 0.12, 5.0);
+    }
+  } else {
+    const dx = e.clientX - p.x;
+    const dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    camTheta -= dx * 0.006;
+    camPhi   -= dy * 0.006;
+    camPhi = THREE.MathUtils.clamp(camPhi, 0.15, Math.PI - 0.15);
+  }
+});
+
+function endPointer(e){ pointers.delete(e.pointerId); }
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('pointerleave', endPointer);
+
+/* =========================================================
+   4. ESTADO DE LA SIMULACIÓN
+   ========================================================= */
+let phase    = 'transcription';   // transcription | transition | translation | done
+let playing  = false;
+let speed    = 1;
+let tPos     = 0;                 // nucleótido actual (transcripción)
+let rPos     = 0;                 // codón actual (traducción)
+let addedCount = 0;
+let transTimer = 0;
+
+const dummy = new THREE.Object3D();
+
+function clearWorld(){
+  for (let i = world.children.length - 1; i >= 0; i--){
+    world.remove(world.children[i]);
+  }
+}
+
+/* =========================================================
+   5. TRANSCRIPCIÓN
+   ========================================================= */
+const T_SLOTS   = 11;
+const T_HALF    = 5;
+const T_SPACING = 0.8;
+
+let tGroup, tPol, tPolRing;
+let tCoding = [], tTemplate = [], tMrna = [];
+
+function buildTranscription(){
+  clearWorld();
+  tCoding = []; tTemplate = []; tMrna = [];
+  tGroup = new THREE.Group();
+  world.add(tGroup);
+
+  for (let j = 0; j < T_SLOTS; j++){
+    const x = (j - T_HALF) * T_SPACING;
+
+    const c = new THREE.Mesh(GEO_SPHERE, MAT.dnaCoding);
+    c.position.set(x, 1.85, 0); c.scale.setScalar(0.30);
+
+    const t = new THREE.Mesh(GEO_SPHERE, MAT.dnaTemplate);
+    t.position.set(x, 0.85, 0); t.scale.setScalar(0.30);
+
+    const m = new THREE.Mesh(GEO_SPHERE, MAT.mrna);
+    m.position.set(x, -0.95, 0); m.scale.setScalar(0.30);
+
+    tGroup.add(c, t, m);
+    tCoding.push(c); tTemplate.push(t); tMrna.push(m);
+  }
+
+  tPol = new THREE.Mesh(new THREE.SphereGeometry(1.5, 16, 12), MAT.pol);
+  tPol.position.set(0, 1.35, 0);
+  tGroup.add(tPol);
+
+  tPolRing = new THREE.Mesh(new THREE.TorusGeometry(1.55, 0.065, 6, 26), MAT.polRing);
+  tPolRing.position.set(0, 1.35, 0);
+  tGroup.add(tPolRing);
+
+  camTarget.set(0, 0.4, 0);
+  updateTranscription();
+}
+
+function updateTranscription(){
+  const base = Math.floor(tPos);
+  for (let j = 0; j < T_SLOTS; j++){
+    const idx = base - T_HALF + j;
+    const inRange = idx >= 0 && idx < N_NT;
+    tCoding[j].visible   = inRange;
+    tTemplate[j].visible = inRange;
+    tMrna[j].visible     = inRange && idx < base;   // ya sintetizado
+  }
+  if (tPol) tPol.rotation.y += 0.02;
+}
+
+/* =========================================================
+   6. TRADUCCIÓN
+   ========================================================= */
+const MRNA_Y     = -2.6;
+const NT_SPACING = 0.5;
+const NT_POOL    = 30;
+const CHAIN_STEP = 0.36;
+
+let trGroup, ribosome, trnaGroup, trnaAA;
+let mrnaPool = [];
+let chainMeshes = {};
+let chainCounts = { apolar:0, polar:0, acido:0, basico:0 };
+
+function codonCenter(c){ return 1.5 * c + 0.5; }
+
+function buildTranslation(){
+  clearWorld();
+
+  trGroup = new THREE.Group();
+  world.add(trGroup);
+
+  /* --- ARNm (pool de nucleótidos visibles) --- */
+  mrnaPool = [];
+  for (let k = 0; k < NT_POOL; k++){
+    const m = new THREE.Mesh(GEO_SPHERE, MAT.mrna);
+    m.scale.setScalar(0.26);
+    trGroup.add(m);
+    mrnaPool.push(m);
+  }
+
+  /* --- Ribosoma (gris) --- */
+  ribosome = new THREE.Group();
+  const torus = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.32, 8, 18), MAT.ribosome);
+  torus.scale.set(1.15, 1, 1);
+  ribosome.add(torus);
+  const dome = new THREE.Mesh(GEO_SPHERE, MAT.ribosomeLt);
+  dome.scale.set(1.0, 0.7, 0.8);
+  dome.position.set(0, 1.25, 0);
+  ribosome.add(dome);
+  ribosome.position.y = MRNA_Y;
+  trGroup.add(ribosome);
+
+  /* --- ARNt (amarillo) --- */
+  trnaGroup = new THREE.Group();
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.1, 6), MAT.trna);
+  stem.position.y = 0.6;
+  trnaGroup.add(stem);
+  const anti = new THREE.Mesh(GEO_SPHERE, MAT.trna);
+  anti.scale.setScalar(0.14);
+  trnaGroup.add(anti);
+  trnaAA = new THREE.Mesh(GEO_SPHERE, MAT_AA.apolar);
+  trnaAA.scale.setScalar(0.27);
+  trnaAA.position.y = 1.38;
+  trnaGroup.add(trnaAA);
+  trGroup.add(trnaGroup);
+
+  /* --- Cadena de aminoácidos (esferas unidas, por grupo químico) --- */
+  chainMeshes = {};
+  for (const g of ['apolar','polar','acido','basico']){
+    const im = new THREE.InstancedMesh(GEO_SPHERE, MAT_AA[g], AA_SEQ.length);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.frustumCulled = false;
+    im.count = 0;
+    trGroup.add(im);
+    chainMeshes[g] = im;
+  }
+  chainCounts = { apolar:0, polar:0, acido:0, basico:0 };
+
+  addedCount = 0;
+  rPos = 0;
+  camTarget.set(codonCenter(0) - 0.8, -1.2, 0);
+  updateTranslation();
+}
+
+function updateTranslation(){
+  const cRaw = Math.floor(rPos);
+  const c    = Math.min(cRaw, N_CODONS - 1);
+  const frac = rPos - cRaw;
+
+  /* --- nucleótidos de ARNm visibles --- */
+  const startNt = (c - 4) * 3;
+  for (let k = 0; k < NT_POOL; k++){
+    const n = startNt + k;
+    const mesh = mrnaPool[k];
+    if (n < 0 || n >= MRNA.length){ mesh.visible = false; continue; }
+    mesh.visible = true;
+    mesh.position.set(n * NT_SPACING, MRNA_Y, 0);
+    mesh.material = (Math.floor(n / 3) === c) ? MAT.mrnaActive : MAT.mrna;
+  }
+
+  /* --- ribosoma sobre el codón activo --- */
+  const riboX = 1.5 * rPos + 0.5;
+  ribosome.position.x = riboX;
+
+  camTarget.x = riboX - 0.8;
+  camTarget.y = -1.2;
+
+  /* --- ARNt trayendo el aminoácido --- */
+  const isStop = c >= AA_SEQ.length;
+  if (!isStop && phase === 'translation'){
+    trnaGroup.visible = true;
+    let ty;
+    if (frac < 0.5)       ty = -3.2 * (1 - frac / 0.5);        // acercamiento
+    else if (frac < 0.75) ty = 0;                              // acoplado
+    else                  ty = -3.2 * ((frac - 0.75) / 0.25);  // salida
+
+    trnaGroup.position.set(codonCenter(c), MRNA_Y + ty, 0);
+    const aa = AA_SEQ[c];
+    trnaAA.material = MAT_AA[AA_GROUP[aa]];
+  } else {
+    trnaGroup.visible = false;
+  }
+
+  /* --- incorporación del aminoácido a la cadena --- */
+  const target = (frac >= 0.5 ? c + 1 : c);
+  while (addedCount < target && addedCount < AA_SEQ.length){
+    addedCount++;
+  }
+
+  /* --- posición de las esferas de la cadena --- */
+  chainCounts = { apolar:0, polar:0, acido:0, basico:0 };
+  for (let i = 0; i < addedCount; i++){
+    const g = AA_GROUP[ AA_SEQ[i] ];
+    const im = chainMeshes[g];
+    const x = riboX - 1.7 - (addedCount - 1 - i) * CHAIN_STEP;
+    dummy.position.set(x, -0.25 + Math.sin(i * 0.7) * 0.12, 0);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.setScalar(0.24);
+    dummy.updateMatrix();
+    im.setMatrixAt(chainCounts[g]++, dummy.matrix);
+  }
+  for (const g of ['apolar','polar','acido','basico']){
+    chainMeshes[g].count = chainCounts[g];
+    chainMeshes[g].instanceMatrix.needsUpdate = true;
+  }
+}
+
+/* =========================================================
+   7. HUD
+   ========================================================= */
+const phaseLabel = document.getElementById('phaseLabel');
+const k1 = document.getElementById('k1'), v1 = document.getElementById('v1');
+const k2 = document.getElementById('k2'), v2 = document.getElementById('v2');
+const k3 = document.getElementById('k3'), v3 = document.getElementById('v3');
+const seqLine = document.getElementById('seqLine');
+
+function updateHUD(){
+  if (phase === 'transcription' || phase === 'transition'){
+    const i = Math.min(Math.floor(tPos), N_NT - 1);
+    k1.textContent = 'ADN (sentido)'; v1.textContent = DNA_CODING[i] || '—';
+    k2.textContent = 'ARNm';          v2.textContent = MRNA[i] || '—';
+    k3.textContent = 'Progreso';      v3.textContent = Math.min(Math.floor(tPos), N_NT) + ' / ' + N_NT + ' nt';
+    phaseLabel.textContent = '1 · Transcripción: ADN → ARNm';
+
+    const upto = Math.min(Math.floor(tPos), MRNA.length);
+    const from = Math.max(0, upto - 26);
+    const txt  = MRNA.slice(from, upto);
+    seqLine.innerHTML = txt.length ? txt.slice(0, -1) + '<b>' + txt.slice(-1) + '</b>' : '—';
+
+  } else {
+    const c    = Math.min(Math.floor(rPos), N_CODONS - 1);
+    const stop = c >= AA_SEQ.length;
+
+    k1.textContent = 'Codón';  v1.textContent = CODONS[c];
+    k2.textContent = 'Aminoácido';
+    v2.textContent = stop ? 'STOP (UAA)' : (AA_SEQ[c] + ' · ' + AA_NAMES[AA_SEQ[c]]);
+    k3.textContent = 'Añadidos';
+    v3.textContent = addedCount + ' / ' + AA_SEQ.length;
+
+    phaseLabel.textContent = (phase === 'done')
+      ? '3 · Traducción completada · codón de paro UAA'
+      : '2 · Traducción: ARNm → proteína';
+
+    const from = Math.max(0, c - 2);
+    const to   = Math.min(N_CODONS, c + 5);
+    let html = '';
+    for (let i = from; i < to; i++){
+      html += (i === c ? '<b>' + CODONS[i] + '</b>' : CODONS[i]) + ' ';
+    }
+    seqLine.innerHTML = html.trim();
+  }
+}
+
+/* =========================================================
+   8. CONTROLES
+   ========================================================= */
+const playBtn  = document.getElementById('playBtn');
+const speedInp = document.getElementById('speed');
+const speedVal = document.getElementById('speedVal');
+
+function updatePlayBtn(){
+  playBtn.textContent = playing ? '❚❚ Pausar' : '▶ Reproducir';
+}
+
+function startSimulation(){
+  tPos = 0; rPos = 0; addedCount = 0;
+  buildTranscription();
+  phase = 'transcription';
+  playing = true;
+  updatePlayBtn();
+}
+
+playBtn.addEventListener('click', () => {
+  if (phase === 'done' || phase === 'transcription' && !playing && tPos === 0 && addedCount === 0 && !tGroup){
+    startSimulation();
+    return;
+  }
+  if (phase === 'done'){
+    startSimulation();
+    return;
+  }
+  playing = !playing;
+  updatePlayBtn();
+});
+
+speedInp.addEventListener('input', () => {
+  speed = parseFloat(speedInp.value);
+  speedVal.textContent = speed.toFixed(2).replace(/0$/, '') + 'x';
+});
+
+/* =========================================================
+   9. BUCLE PRINCIPAL
+   ========================================================= */
+let lastT = 0;
+
+function loop(now){
+  requestAnimationFrame(loop);
+
+  if (!lastT) lastT = now;
+  let dt = (now - lastT) / 1000;
+  lastT = now;
+  if (dt > 0.05) dt = 0.05;
+
+  if (playing){
+    if (phase === 'transcription'){
+      tPos += dt * 30 * speed;
+      if (tPos >= N_NT){
+        tPos = N_NT;
+        phase = 'transition';
+        transTimer = 0.9;
+      }
+    }
+    else if (phase === 'transition'){
+      transTimer -= dt;
+      if (transTimer <= 0){
+        buildTranslation();
+        phase = 'translation';
+      }
+    }
+    else if (phase === 'translation'){
+      if (rPos < N_CODONS - 1){
+        rPos += dt * 2.6 * speed;
+        if (rPos >= N_CODONS - 1){
+          rPos = N_CODONS - 1;
+          phase = 'done';
+          playing = false;
+          updatePlayBtn();
+        }
+      }
+    }
+  }
+
+  if (phase === 'transcription' || phase === 'transition') updateTranscription();
+  if (phase === 'translation'  || phase === 'done')        updateTranslation();
+
+  updateHUD();
+  updateCamera();
+  renderer.render(scene, camera);
+}
+
+/* =========================================================
+   10. ARRANQUE Y RESIZE
+   ========================================================= */
+function onResize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(w, h, false);
+  computeBaseDist();
+}
+window.addEventListener('resize', onResize);
+window.addEventListener('orientationchange', () => setTimeout(onResize, 250));
+
+computeBaseDist();
+buildTranscription();
+phase = 'transcription';
+playing = false;
+updatePlayBtn();
+updateHUD();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
